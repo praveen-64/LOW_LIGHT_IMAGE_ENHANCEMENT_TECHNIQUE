@@ -1,0 +1,36 @@
+% to read low light image
+I=imread('image.jpg');
+%subplot(1,3,1);
+%imshow(I);
+% formula to find beta and gamma from "k".
+ k=20;
+x=1.1258*(1-k^(-0.3293));
+beta=2.71828^x;
+gamma=k^(-0.3293);
+%disp(beta);
+%disp(gamma);
+alpha=beta^(1/gamma);
+% linear amplifying image I and ploting HE in r,g and b channels
+%x=imadjust(I,[],[],gamma); % to find c(here gamma), use k=2.34, beta=1.16 and use c=log to base k of beta
+J=alpha*I;
+%subplot(1,3,2);
+%imshow(J);
+
+%%%%img=I*(beta.^gamma)
+%subplot(1,3,3);
+%imshow(img);
+%new
+[rows,columns]=size(I);
+squaredErrorImage = (double(I) - double(J)) .^ 2;
+
+rmse=sqrt(sum(squaredErrorImage(:)) / (rows * columns));
+disp(rmse);
+subplot(1,2,1); imshow(I); title('Original Image');
+subplot(1,2,2); imshow(J); title('Enhanced Result');
+
+
+
+
+
+
+
