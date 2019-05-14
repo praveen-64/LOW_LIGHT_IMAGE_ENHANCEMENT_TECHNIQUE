@@ -1,0 +1,9 @@
+I=imread('see.jpg');
+warning('off','all');
+image = double(I)/255;
+image = imresize(image, 0.1);
+result = dehaze(image, 0.95, 15);
+warning('on','all');
+
+subplot(1,2,1); imshow(I);title('hazy image');
+subplot(1,2,2); imshow(result);title('dehazed image');
