@@ -1,0 +1,87 @@
+warning('off','all');
+image = double(imread('one.jpg'))/255;
+image = imresize(image, 0.1);
+result = dehaze(image, 0.95, 15);
+warning('on','all');
+J= Ying_2017_ICCV(result);
+
+subplot(1,2,1);imshow(image);title('low-light-hazed image');
+% subplot(1,3,2);imshow(result);title('dehazed image');
+subplot(1,2,2);imshow(J);title('dehazed-enhanced image');
+
+% OUR ENHANCEMENT 
+
+function J = Ying_2017_ICCV(I) 
+    if ~isfloat(I), I = im2double(I); end % check if pixel values are integers, if yes, convert to double precession 
+    %% initializing parameters
+    alpha = 15;
+    eps = 0.001;
+    range = 5;
+    ratioMin = 1/7;
+    
+    %% Camear Model
+    % we use beta-gamma model as default
+    param = {-0.3293    1.1258};
+    [a, b] = deal(param{:});
+    f = @(x)exp((1-x.^a).*b);    % x=exposure ratio value for each pixel
+    g = @(I,k)I.^(k.^a).*f(k);   % I=low light image k=exposure ratio map
+    %% Exposure Ratio Map
+    % Initial Exposure Ratio Map
+    t0 = max(I, [], 3); % max of R,G and B channel 
+    [M,N] = size(t0);   % to find size of t0;
+    t0 = imresize(t0,0.5);  % compressing image
+    dt0_v = [diff(t0,1,1);t0(1,:)-t0(end,:)];  % difference of adjascent rows
+    dt0_h = [diff(t0,1,2)';t0(:,1)'-t0(:,end)']';  % difference of adjascent columns
+    gauker_h = filter2(ones(1,range),dt0_h); % 
+    gauker_v = filter2(ones(range,1),dt0_v);
+    W_h = 1./(abs(gauker_h).*abs(dt0_h)+eps);
+    W_v = 1./(abs(gauker_v).*abs(dt0_v)+eps);
+    T = solveLinearEquation(t0,W_h,W_v,alpha./2); % To find T 
+    T = imresize(T,[M,N]);
+    T = repmat(T, [1 1 3]); 
+    % subplot(1,3,2);imshow(T);title('Illumination Map');
+    
+    kRatio = 1./max(T,ratioMin);
+    J = g(I, kRatio);  
+    J = max(0, min(1, J));
+end
+
+function OUT = solveLinearEquation( IN, wx, wy, lambda )
+    [ r, c, ch ] = size( IN );%rows,clumnc,channels
+    k = r * c; %Total number of values in K-ratio map
+    dx =  -lambda * wx( : );
+    dy =  -lambda * wy( : );
+    tempx = [wx(:,end),wx(:,1:end-1)];
+    tempy = [wy(end,:);wy(1:end-1,:)];
+    dxa = -lambda *tempx(:);
+    dya = -lambda *tempy(:);
+    tempx = [wx(:,end),zeros(r,c-1)];
+    tempy = [wy(end,:);zeros(r-1,c)];
+    dxd1 = -lambda * tempx(:);
+    dyd1 = -lambda * tempy(:);
+    wx(:,end) = 0;
+    wy(end,:) = 0;
+    dxd2 = -lambda * wx(:);
+    dyd2 = -lambda * wy(:);
+    Ax = spdiags( [dxd1,dxd2], [-k+r,-r], k, k );
+    Ay = spdiags( [dyd1,dyd2], [-r+1,-1], k, k );
+    D = 1 - ( dx + dy + dxa + dya);
+    A = (Ax+Ay) + (Ax+Ay)' + spdiags( D, 0, k, k );
+    if exist( 'ichol', 'builtin' )
+        L = ichol( A, struct( 'michol', 'on' ) );
+        OUT = IN;
+        for ii = 1:ch
+            tin = IN( :, :, ii );
+            [ tout, flag ] = pcg( A, tin( : ), 0.1, 50, L, L' );
+            OUT( :, :, ii ) = reshape( tout, r, c );
+        end
+
+    else
+        OUT = IN;
+        for ii = 1:ch
+            tin = IN( :, :, ii );
+            tout = A\tin( : );
+            OUT( :, :, ii ) = reshape( tout, r, c );
+        end
+    end
+end
