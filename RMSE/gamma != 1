@@ -1,0 +1,122 @@
+
+I = imread('image.jpg');
+J = Ying_2017_ICCV(I);
+[rows,columns]=size(I);
+SE=0.0;
+%{
+for i=1:rows
+    for j=1:columns
+        E = ((I(i,j)-J(i,j)).^2 ) / (rows * columns);
+        SE = SE + E;
+    end
+end
+%}
+squaredErrorImage = (double(I) - double(J)) .^ 2;
+MSE= sum(squaredErrorImage(:)) / (rows * columns);
+
+RMSE=sqrt(MSE);
+disp(RMSE);
+subplot(1,2,1); imshow(I); title('Original Image');
+subplot(1,2,2); imshow(J); title('Enhanced Result');
+
+function J = Ying_2017_ICCV(I, model) 
+    if ~isfloat(I), I = im2double(I); end
+    %% Param Settings
+    k=20;
+    x=1.1258*(1-k^(-0.3293));
+    beta=2.71828^x;
+    gamma=k^(-0.3293);
+    alpha=beta^(1/gamma);
+    eps = 0.001;
+    range = 5;
+    ratioMin = 1/7;
+    %% Camear Model
+    % we use beta-gamma model as default
+    param = {-0.3293    1.1258};
+    [a, b] = deal(param{:});
+    f = @(x)exp((1-x.^a).*b);
+    g = @(I,k)I.^(k.^a).*f(k);
+    %% Exposure Ratio Map
+    % Initial Exposure Ratio Map
+    t0 = max(I, [], 3);
+    [M,N] = size(t0);
+    %disp(size(t0));
+    % Exposure Ratio Map Refinement
+    t0 = imresize(t0,0.5);
+    dt0_v = [diff(t0,1,1);t0(1,:)-t0(end,:)];
+    dt0_h = [diff(t0,1,2)';t0(:,1)'-t0(:,end)']';
+    gauker_h = filter2(ones(1,range),dt0_h);
+    gauker_v = filter2(ones(range,1),dt0_v);
+    W_h = 1./(abs(gauker_h).*abs(dt0_h)+eps);
+    W_v = 1./(abs(gauker_v).*abs(dt0_v)+eps);
+    T = solveLinearEquation(t0,W_h,W_v,alpha./2);
+    T = imresize(T,[M,N]);
+    %subplot(1,3,3); imshow(T); title('ILLUMINATION MAP Result');
+    %disp(size(T));
+    
+    T = repmat(T, [1 1 3]);
+    % subplot(1,3,2); imshow(T); title('ILLUMINATION MAP');
+    kRatio = 1./max(T,ratioMin);
+    %disp(kRatio);
+    %disp(size(kRatio));
+    %% Enhancement
+    J = g(I, kRatio);
+    %diap(J);
+    J = max(0, min(1, J));
+end
+
+function OUT = solveLinearEquation( IN, wx, wy, lambda )
+    [ r, c, ch ] = size( IN );%rows,clumnc,channels
+    k = r * c; %Total number of values in K-ratio map
+    dx =  -lambda * wx( : );
+    dy =  -lambda * wy( : );
+    tempx = [wx(:,end),wx(:,1:end-1)];
+    tempy = [wy(end,:);wy(1:end-1,:)];
+    dxa = -lambda *tempx(:);
+    dya = -lambda *tempy(:);
+    tempx = [wx(:,end),zeros(r,c-1)];
+    tempy = [wy(end,:);zeros(r-1,c)];
+    dxd1 = -lambda * tempx(:);
+    dyd1 = -lambda * tempy(:);
+    wx(:,end) = 0;
+    wy(end,:) = 0;
+    dxd2 = -lambda * wx(:);
+    dyd2 = -lambda * wy(:);
+    Ax = spdiags( [dxd1,dxd2], [-k+r,-r], k, k );
+    Ay = spdiags( [dyd1,dyd2], [-r+1,-1], k, k );
+    D = 1 - ( dx + dy + dxa + dya);
+    A = (Ax+Ay) + (Ax+Ay)' + spdiags( D, 0, k, k );
+    if exist( 'ichol', 'builtin' )
+        L = ichol( A, struct( 'michol', 'on' ) );
+        OUT = IN;
+        for ii = 1:ch
+            tin = IN( :, :, ii );
+            [ tout, flag ] = pcg( A, tin( : ), 0.1, 50, L, L' );
+            OUT( :, :, ii ) = reshape( tout, r, c );
+        end
+    else
+        OUT = IN;
+        for ii = 1:ch
+            tin = IN( :, :, ii );
+            tout = A\tin( : );
+            OUT( :, :, ii ) = reshape( tout, r, c );
+        end
+    end
+end
+
+
+%{
+I=imread('30.jpg');
+J=1.6151*I;
+x=imadjust(J,[],[],0.56);
+squaredErrorImage = (double(I) - double(x)) .^ 2;
+[rows,columns]=size(squaredErrorImage);
+MSE= sum(squaredErrorImage(:)) / (rows * columns);
+
+RMSE=sqrt(MSE);
+disp(RMSE);
+subplot(2,2,1); imshow(I); title('Original Image');
+subplot(2,2,2); imshow(x); title('Enhanced Result');
+%}
+
+
