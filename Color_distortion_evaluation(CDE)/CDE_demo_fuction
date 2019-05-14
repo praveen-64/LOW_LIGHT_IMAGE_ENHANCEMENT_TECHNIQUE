@@ -1,0 +1,575 @@
+
+CDE_AMSR=0;
+CDE_BPDHE=0;
+% CDE_DONG=0;
+CDE_NPE=0;
+CDE_OUR=0;
+
+input = 'C:\Users\PRAVEEN KUMAR R\Documents\MATLAB\low_light_hazed_images';
+% output = 'C:\Users\PRAVEEN KUMAR R\Documents\MATLAB\TRASH\LOE_OUTPUT';
+files = dir(fullfile(input,'*.jpg'));
+length = numel(files);
+for i = 1:length
+    disp(i);
+    filename = fullfile(input,files(i).name);
+    I = imread(filename);
+    
+    warning('off','all');
+    image = double(I)/255;
+    image = imresize(image, 0.1); % original value was 0.1
+    result = dehaze(image, 0.95, 15);
+    % imshow(result);
+    
+    % AMSR_ENHANCEMENT
+    A = amsr(result,15,80,250); % initailly : 15 80 250
+    q = Calculate_CDE(A);
+    CDE_AMSR = CDE_AMSR + q;
+    
+    % BPDHE_ENHANCEMENT
+    B = bpdhe(result);
+    w = Calculate_CDE(B);
+    CDE_BPDHE = CDE_BPDHE + w;
+    
+    %{
+    % DONG_ENHANCEMENT
+    C = Dong( I ,0.8);% second argument = 0.8
+    e = Calculate_CDE(C);
+    CDE_DONG = CDE_DONG + e;
+    %}
+    
+    % NPE_ENHANCEMENT
+    D=NPIE_MLLS(result);
+    t = Calculate_CDE(D);
+    CDE_NPE = CDE_NPE + t;
+    
+    % OUR_ENHANCEMENT
+    E = Ying_2017_ICCV(result);
+    E=real(E);
+    y = Calculate_CDE(E);
+    CDE_OUR = CDE_OUR + y;
+end
+FINAL_AMSR = CDE_AMSR / length;
+disp("CDE_OF_AMSR : ");disp(FINAL_AMSR);
+FINAL_BPDHE = CDE_BPDHE / length;
+disp("CDE_OF_BPDHE : ");disp(FINAL_BPDHE);
+%{
+FINAL_DONG = CDE_DONG / length;
+disp("CDE_OF_DONG : ");disp(FINAL_DONG);
+%}
+FINAL_NPE = CDE_NPE / length;
+disp("CDE_OF_NPE : ");disp(FINAL_NPE);
+FINAL_OUR = CDE_OUR / length;
+disp("CDE_OF_PROPOSED_METHOD : ");disp(FINAL_OUR);
+
+%{
+title('COLOR_DISTORTION_ERROR');
+p = categorical({'AMSR','BPDHE','DONG','NPE','OUR'});
+ylabel('CDE_VALUES');
+CDE = [0.1538 37.6300 36.2133 29.5373 23.3346];
+bar(p,CDE);
+%}
+
+function CDE = Calculate_CDE(J)
+    Lab=rgb2lab(J);
+
+    [rows, columns, numberOfColorBands] = size(J);
+
+    LChannelJ = Lab(:, :, 1); 
+    aChannelJ = Lab(:, :, 2); 
+    bChannelJ = Lab(:, :, 3);
+
+    LmeanJ=mean(LChannelJ,'all');
+    ameanJ=mean(aChannelJ,'all');
+    bmeanJ=mean(bChannelJ,'all');
+
+
+    LStandardJ = LmeanJ * ones(rows, columns);
+    aStandardJ = ameanJ * ones(rows, columns);
+    bStandardJ = bmeanJ * ones(rows, columns);
+
+    deltaLJ = LChannelJ - LStandardJ;
+    deltaaJ = aChannelJ - aStandardJ;
+    deltabJ = bChannelJ - bStandardJ;
+
+    E = sqrt(deltaLJ .^ 2 + deltaaJ .^ 2 + deltabJ .^ 2);
+
+    deltaE=mean(E,'all');
+    CDE = deltaE;
+end
+
+% AMSR_ENHANCEMENT
+function A = amsr(im,sigma1,sigma2,sigma3)
+if ~exist('sigma1','var'),sigma1 = 15;end % initially 15 
+if ~exist('sigma2','var'),sigma2 = 80;end % initially 80
+if ~exist('sigma3','var'),sigma3 = 250;end % initially 250
+
+im = im2double(im); % double --> im2double
+gausKernel1 = fspecial('gaussian',[sigma1 sigma1],5);
+gausKernel2 = fspecial('gaussian',[sigma2 sigma2],20);
+gausKernel3 = fspecial('gaussian',[sigma3 sigma3],50);
+Y = 0.299.*im(:,:,1)+0.587.*im(:,:,2)+0.114.*im(:,:,3);
+
+blur_im1 = (imfilter(Y,gausKernel1,'replicate'));
+blur_im2 = (imfilter(Y,gausKernel2,'replicate'));
+blur_im3 = (imfilter(Y,gausKernel3,'replicate'));
+
+Y_ssr1 = log(Y) - log(blur_im1);
+Y_ssr2 = log(Y) - log(blur_im2);
+Y_ssr3 = log(Y) - log(blur_im3);
+
+sr = sort(Y_ssr1(:));
+p1 = sr(uint32(0.01*size(im,1)*size(im,2)));
+p99 = sr(uint32(0.99*size(im,1)*size(im,2)));
+lc1 = Y_ssr1 >= p1 & Y_ssr1 <= p99;
+lc2 = Y_ssr1 < p1;
+lc3 = Y_ssr1 > p99;
+Y_ssr1(lc1) = 255 * (Y_ssr1(lc1)-p1)./(p99-p1);
+Y_ssr1(lc2) = 0;
+Y_ssr1(lc3) = 255;
+
+sr = sort(Y_ssr2(:));
+p1 = sr(uint32(0.01*size(im,1)*size(im,2)));
+p99 = sr(uint32(0.99*size(im,1)*size(im,2)));
+lc1 = Y_ssr2 >= p1 & Y_ssr2 <= p99;
+lc2 = Y_ssr2 < p1;
+lc3 = Y_ssr2 > p99;
+Y_ssr2(lc1) = 255 * (Y_ssr2(lc1)-p1)./(p99-p1);
+Y_ssr2(lc2) = 0;
+Y_ssr2(lc3) = 255;
+
+sr = sort(Y_ssr3(:));
+p1 = sr(uint32(0.01*size(im,1)*size(im,2)));
+p99 = sr(uint32(0.99*size(im,1)*size(im,2)));
+lc1 = Y_ssr3 >= p1 & Y_ssr3 <= p99;
+lc2 = Y_ssr3 < p1;
+lc3 = Y_ssr3 > p99;
+Y_ssr3(lc1) = 255 * (Y_ssr3(lc1)-p1)./(p99-p1);
+Y_ssr3(lc2) = 0;
+Y_ssr3(lc3) = 255;
+
+sigma = 32; % originally sigma=32
+mu0 = 32;% 32
+mu1 = 96;% 96
+mu2 = 160;% 160
+mu3 = 224;% 224
+P0 = exp(-(Y-mu0).^2./(2*sigma^2));
+P1 = exp(-(Y-mu1).^2./(2*sigma^2));
+P2 = exp(-(Y-mu2).^2./(2*sigma^2));
+P3 = max(P0,exp(-(Y-mu3).^2./(2*sigma^2)));
+psum = P0+P1+P2+P3;
+omega0 = P0./psum;
+omega1 = P1./psum;
+omega2 = P2./psum;
+omega3 = P3./psum;
+Y_amsr = omega0.*Y + omega1.*Y_ssr1 + omega2.*Y_ssr2 + omega3.*Y_ssr3;
+ratio = Y_amsr./Y;
+
+% modified: uint8 --> im2uint8
+hsv = rgb2hsv(im2uint8(im));
+v = hsv(:,:,3);%.*255;
+v = 50.*(ratio.*(v+Y)+v-Y);% originally multiply by 0.5 % change
+hsv(:,:,3) = v./225;% divide by 225
+%d = uint8(hsv2rgb(hsv).*255);
+A = double(hsv2rgb(hsv)); % modified
+A = min(max(A,0),15); % initially last term is 1 % change
+end
+
+%BPDHE_ENHANCEMENT
+function B = bpdhe(im)
+im = im2uint8(im);
+hsv = rgb2hsv(im);
+h = hsv(:,:,1);
+s = hsv(:,:,2);
+i = uint8(hsv(:,:,3).*255);% initially *255
+% i = uint8(20+rand(512).*(200));
+ma = double(max(i(:)));
+mi = double(min(i(:)));
+bins = (ma-mi)+1;
+hist_i = hist(double(i(:)),bins);
+gausFilter = fspecial('gaussian',[1 9],1.0762);
+blur_hist = (imfilter(hist_i,gausFilter,'replicate'));
+derivFilter = [-1 1];
+deriv_hist = imfilter(blur_hist,derivFilter,'replicate');
+sign_hist = sign(deriv_hist);
+meanFilter = [1/3 1/3 1/3];
+smooth_sign_hist = sign(imfilter(sign_hist,meanFilter,'replicate'));
+cmpFilter = [1 1 1  -1 -1 -1 -1 -1];
+index = zeros([1,3]);
+index(1) = 0;
+p = 2;
+for n = 1:bins-7
+    C = smooth_sign_hist(n:n+7) == cmpFilter;
+    if sum(C) ==8
+        index(p) = n+3;
+        p = p+1;
+    end 
+end
+index(p) = bins;
+factor = zeros([length(index)-1,1]);
+span = factor;
+M = factor;
+range = factor;
+start = factor;
+endd = factor;
+sub_hist = cell([length(index)-1,1]);
+for m = 1:length(index)-1;
+    sub_hist{m} = hist_i(index(m)+1:index(m+1));
+    M(m) = sum(sub_hist{m});
+    low = mi + index(m);
+    high = mi + index(m+1)-1; 
+    span(m) = high-low+1;
+    factor(m) = span(m)*log10(M(m));
+end
+factor_sum = sum(factor);
+for m = 1:length(index)-1;
+    range(m) = round((256-mi)*factor(m)/factor_sum);
+end
+start(1) = mi;
+endd(1) = mi+range(1)-1;
+for m = 2:length(index)-1;
+    start(m) = start(m-1)+range(m-1);
+    endd(m) = endd(m-1)+range(m);
+end
+y = cell([length(index)-1,1]);
+s_r = zeros([1,mi]);
+for m = 1:length(index)-1;
+    hist_cum = cumsum(sub_hist{m});
+    c = hist_cum./M(m);
+    y{m} = round(start(m)+(endd(m)-start(m)).*c);
+    s_r = [s_r,y{m}];
+end
+i_s = zeros(size(i));
+for n = mi:ma
+    lc = i == n;
+    i_s(lc) = double(s_r(n+1))/255;
+end
+% hist_is = hist(double(i_s(:)),bins);
+hsi_o = cat(3,h,s,i_s);
+B = uint8(hsv2rgb(hsi_o).*255);
+B=B*4;
+end
+
+%{
+%DONG_ENHANCEMENT
+function C = Dong( im ,w )
+    if max(im(:)) > 1
+        im = im2double(im);
+    end
+    isize = size(im);
+    im =  padarray(im,[2*5,2*5,0],'replicate');
+    if (~exist('w','var') || w<=0)
+        w = 0.8;
+    end
+    
+    R = 1 - im;
+%     [Rd,~] = dehaze(R,w);
+    Ir = R(:,:,1);
+    Ig = R(:,:,2);
+    Ib = R(:,:,3);
+
+    Ir1 = Ir(:);
+    Ig1 = Ig(:);
+    Ib1 = Ib(:);
+    Il = (Ir1+Ig1+Ib1)./3;
+    n = length(Il);
+    N = floor(n*0.002);
+
+    Ir_d = ordfilt2(Ir,1,ones(7,7));
+    Ig_d = ordfilt2(Ig,1,ones(7,7));
+    Ib_d = ordfilt2(Ib,1,ones(7,7));
+    darkc = min(min(Ir_d(:),Ig_d(:)),Ib_d(:));
+    [~, i] = sort(darkc,1,'descend');
+    temp = Il(i(1:N));
+    [~,j] = sort(temp,1,'descend');
+    Ar = Ir1(i(j(1)));
+    Ag = Ig1(i(j(1)));
+    Ab = Ib1(i(j(1)));
+% exp(log())
+    t = max(1-w.*min(min(Ir_d./Ar,Ig_d./Ag),Ib_d./Ab),10^(-7));
+    lc = t<0.5;
+    t(lc) = 2 * t(lc).^2;
+
+    Sr = (Ir - Ar)./t +Ar;
+    Sg = (Ig - Ag)./t +Ag;
+    Sb = (Ib - Ab)./t +Ab;
+
+    Rd = cat(3,Sr,Sg,Sb);
+    C = 1-Rd(11:isize(1)+10,11:isize(2)+10,:);
+end
+
+%}
+
+%NPE_ENHANCEMENT
+function D=NPIE_MLLS(pic)    %Saturation_based Dehazing         
+        % important parameters mentioned in the paper
+        ratio=0.0001; % initial ratio=0.8
+        % other parameters
+        illu_min=10; % the minimum illumination
+        
+        [m,n,k]=size(pic); % m and n indicate the size of the image
+        pichsv=rgb2hsv(pic);
+        
+        picV=pichsv(:,:,3);
+        picV=round((picV-min(picV(:)))/(max(picV(:))-min(picV(:)))*255);
+        prelum=BiFltL(picV);% F_0
+        
+        % R-the high-frequency component by decomposing the original image directly
+        ro(:,:,1)=picV./max(prelum,illu_min);
+            
+        layer=1;
+        % sc-the relative size change of the new layer to the original image size
+        % [m, n]->[sc*m, sc*n]
+        sc=1-ratio^layer; 
+        prelum=Illumination_Modify(round(prelum),sc);% F_1
+        r=1;
+        while 1
+            postlum=imresize(prelum,ratio);
+            postlum=BiFltL(postlum); 
+            
+            % resize the illumination to the same size as the original
+            % image, to calculate the reflectance
+            pre=imresize(prelum,[m,n]); % F_i
+            post=min(255,max(0,imresize(postlum,[m,n])));% F_i+1
+            r=r.*(pre./max(post,illu_min));% R_i+1
+            
+            layer=layer+1;
+            if (max(postlum(:))-min(postlum(:)))<=3
+                break;
+            end
+            
+            prelum=postlum;
+            sc=1-ratio^layer;
+            prelum=Illumination_Modify(round(prelum),sc);
+        end
+       
+        % post-the low-frequency component of the last layer
+        if max(post)==min(post)
+            post=255;
+        else
+            sc=1-ratio^layer;
+            post=Illumination_Modify(round(post),sc);
+        end
+        
+        ehcV=ro;
+        ehcV=ehcV.*r.*post;
+        pichsv(:,:,3)=ehcV/max(ehcV(:));
+        D=hsv2rgb(pichsv);
+end
+function out=BiFltL(img)
+    img=double(uint8(img));
+    
+    win=7;
+    [m,n]=size(img);
+
+    localmax=getlocalmax(img,win);
+    
+    win=15;
+    extimg=getextpic(img,win);
+    extmin=getextpic(localmax,win);
+    sigmar=3;
+
+    
+    gn=256;
+    coef=zeros(gn,gn);
+    coev=zeros(gn,gn);
+    for i=1:gn
+        rg=i:gn;
+        coef(i,rg)=exp((i-rg)/(2*sigmar^2));
+        coev(i,rg)=coef(i,rg).*rg;
+    end
+    rimg=zeros(m,n);
+    
+    for i=win+1:win+m
+        for j=win+1:win+n
+            r=coef(extimg(i,j)+1,extmin(i-win:i+win,j-win:j+win)+1);
+            v=coev(extimg(i,j)+1,extmin(i-win:i+win,j-win:j+win)+1);
+            rimg(i-win,j-win)=sum(r(:));
+            img(i-win,j-win)=sum(v(:));
+        end
+    end
+    out=img./rimg-1;
+    out=round(out);
+end
+
+function output=getlocalmax(pic,win)
+    [m,n]=size(pic);
+    extpic=getextpic(pic,win);
+    output=zeros(m,n);
+    for i=1+win:m+win
+        for j=1+win:n+win
+            modual=extpic(i-win:i+win,j-win:j+win);
+            output(i-win,j-win)=max(modual(:));
+        end
+    end
+end
+
+function output=getextpic(im,win_size)
+    [h,w,c]=size(im);
+    extpic=zeros(h+2*win_size,w+2*win_size,c);
+    extpic(win_size+1:win_size+h,win_size+1:win_size+w,:)=im;
+    for i=1:win_size%extense row
+        extpic(win_size+1-i,win_size+1:win_size+w,:)=extpic(win_size+1+i,win_size+1:win_size+w,:);%top edge
+        extpic(h+win_size+i,win_size+1:win_size+w,:)=extpic(h+win_size-i,win_size+1:win_size+w,:);%botom edge
+    end
+    for i=1:win_size%extense column
+        extpic(:,win_size+1-i,:)=extpic(:,win_size+1+i,:);%left edge
+        extpic(:,win_size+w+i,:)=extpic(:,win_size+w-i,:);%right edge
+    end
+    output=extpic;
+end
+
+function map_F=Illumination_Modify(F,sizechange)   
+    %daytime prior
+    p=[1294.75414748187,-2713.68523841986,1493.35807097634,-309.408936331282,228.341462306966];
+    p_light=[-323.911133578029,599.713581415139,-310.027762122558,114.170739523336,175.368221301063];
+    
+    range=p(1)*sizechange.^4+p(2)*sizechange.^3+p(3)*sizechange.^2+p(4)*sizechange.^1+p(5);
+    light=p_light(1)*sizechange.^4+p_light(2)*sizechange.^3+p_light(3)*sizechange.^2+p_light(4)*sizechange.^1+p_light(5);
+    
+    F=F+255-max(F(:));
+    [counts,list] = imhist(uint8(F));
+    total=sum(counts);
+    
+    F=F/255;
+    list=list/255;
+    range=range/255;
+    light=light/255;
+    Fmin=min(F(:));
+    Fmax=max(F(:));
+    
+    range_in=Fmax-Fmin;
+    
+    last_dir=0; %direction, indicates increase and decrease of r
+    step=0.2;
+    r=1;
+    r_min=1/10;
+    r_max=10;
+    delta=5/255;
+    
+    %the first time
+    g_list=list.^r;
+    g_Fmax=Fmax^r;
+    g_Fmin=Fmin^r;
+    
+    
+    
+    if Fmax-Fmin>range
+        map_list=(g_list-g_Fmin)/((g_Fmax-g_Fmin)+~(g_Fmax-g_Fmin))*range+(1-range);
+    else
+        map_list=(g_list-g_Fmin)/((g_Fmax-g_Fmin)+~(g_Fmax-g_Fmin))*range_in+(1-range_in);
+    end
+        
+    
+    aver_light=sum(map_list.*counts)/total;
+    inter_num=0;
+    while abs(aver_light-light)>delta && inter_num<30 %(r>r_min && r<r_max) && 
+        g_list=list.^r;
+        g_Fmax=Fmax^r;
+        g_Fmin=Fmin^r;
+        
+        if Fmax-Fmin>range
+            map_list=(g_list-g_Fmin)/((g_Fmax-g_Fmin)+~(g_Fmax-g_Fmin))*range+(1-range);
+        else
+            map_list=(g_list-g_Fmin)/((g_Fmax-g_Fmin)+~(g_Fmax-g_Fmin))*range_in+(1-range_in);
+        end
+        
+
+        aver_light=sum(map_list.*counts)/total;
+
+        if aver_light>light && last_dir~=-1
+            r=r+step;
+            last_dir=1;
+        elseif aver_light>light && last_dir==-1
+            step=step/2;
+            r=r+step;
+            last_dir=1;    
+        elseif aver_light<light && last_dir~=1
+            r=r-step;
+            last_dir=-1;
+        elseif aver_light<light && last_dir==1
+            step=step/2;
+            r=r-step;
+            last_dir=-1;
+        end
+        r=min(max(r,r_min),r_max);
+
+        inter_num=inter_num+1;
+    end
+    
+    map_F=map_list(round(F*255)+1)*255;
+    
+end
+
+% OUR_ENHANCEMENT
+
+function E = Ying_2017_ICCV(I)
+
+    if ~isfloat(I), I = im2double(I); end % check if pixel values are integers, if yes, convert to double precession 
+    %% initializing parameters
+    alpha = 0 ;% initially alpha = 15
+    eps = 0.001;
+    range = 5;
+    ratioMin = 1/7;
+    %% Camear Model
+    % we use beta-gamma model as default
+    param = {-0.3293    1.1258};
+    [a, b] = deal(param{:});
+    f = @(x)exp((1-x.^a).*b);    % x=exposure ratio value for each pixel
+    g = @(I,k)I.^(k.^a).*f(k);   % I=low light image k=exposure ratio map
+    %% Exposure Ratio Map
+    % Initial Exposure Ratio Map
+    t0 = max(I, [], 3); % max of R,G and B channel 
+    [M,N] = size(t0);   % to find size of t0;
+    t0 = imresize(t0,0.5);  % compressing image
+    dt0_v = [diff(t0,1,1);t0(1,:)-t0(end,:)];  % difference of adjascent rows
+    dt0_h = [diff(t0,1,2)';t0(:,1)'-t0(:,end)']';  % difference of adjascent columns
+    gauker_h = filter2(ones(1,range),dt0_h); % 
+    gauker_v = filter2(ones(range,1),dt0_v);
+    W_h = 1./(abs(gauker_h).*abs(dt0_h)+eps);
+    W_v = 1./(abs(gauker_v).*abs(dt0_v)+eps);
+    T = solveLinearEquation(t0,W_h,W_v,alpha./2); % To find T 
+    T = imresize(T,[M,N]);
+    T = repmat(T, [1 1 3]); 
+    kRatio = 1./max(T,ratioMin);
+    E = g(I, kRatio);  
+    E = max(0, min(1, E));
+end
+
+function OUT = solveLinearEquation( IN, wx, wy, lambda )
+    [ r, c, ch ] = size( IN );%rows,clumnc,channels
+    k = r * c; %Total number of values in K-ratio map
+    dx =  -lambda * wx( : );
+    dy =  -lambda * wy( : );
+    tempx = [wx(:,end),wx(:,1:end-1)];
+    tempy = [wy(end,:);wy(1:end-1,:)];
+    dxa = -lambda *tempx(:);
+    dya = -lambda *tempy(:);
+    tempx = [wx(:,end),zeros(r,c-1)];
+    tempy = [wy(end,:);zeros(r-1,c)];
+    dxd1 = -lambda * tempx(:);
+    dyd1 = -lambda * tempy(:);
+    wx(:,end) = 0;
+    wy(end,:) = 0;
+    dxd2 = -lambda * wx(:);
+    dyd2 = -lambda * wy(:);
+    Ax = spdiags( [dxd1,dxd2], [-k+r,-r], k, k );
+    Ay = spdiags( [dyd1,dyd2], [-r+1,-1], k, k );
+    D = 1 - ( dx + dy + dxa + dya);
+    A = (Ax+Ay) + (Ax+Ay)' + spdiags( D, 0, k, k );
+    if exist( 'ichol', 'builtin' )
+        L = ichol( A, struct( 'michol', 'on' ) );
+        OUT = IN;
+        for ii = 1:ch
+            tin = IN( :, :, ii );
+            [ tout, flag ] = pcg( A, tin( : ), 0.1, 50, L, L' );
+            OUT( :, :, ii ) = reshape( tout, r, c );
+        end
+    else
+        OUT = IN;
+        for ii = 1:ch
+            tin = IN( :, :, ii );
+            tout = A\tin( : );
+            OUT( :, :, ii ) = reshape( tout, r, c );
+        end
+    end
+end
